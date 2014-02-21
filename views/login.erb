@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset=”utf-8”> 
+<link rel="stylesheet" href="//netdna.bootstrapcdn.com/bootstrap/3.1.1/css/bootstrap.min.css">
+<link rel="stylesheet" href="//netdna.bootstrapcdn.com/bootstrap/3.1.1/css/bootstrap-theme.min.css">
+<title>Fitstats</title
+</head>
+<body>
+<div class="container">
+    <h1>Fitstats</h1>
+    <p class="lead">Fitbit tracking data in <a href="https://panic.com/statusboard/">Panic's Status Board</a></p>
+    <div class="row">
+        <div class="col-sm-8">
+            <p>Hi there.
+            <p>Welcome to fitstats; a simple web-service designed to help you display your
+            fitbit health information on Status Board by Panic.
+            <p>In order to use fitstats you first need to link it to your Fitbit account.
+            <p><a class="btn btn-lg btn-warning" href="/auth/fitbit">Link to Fitbit</a>
+        </div>
+        <div class="col-sm-4">
+            <div class="panel panel-warning">
+                <div class="panel-heading">
+                    <h3 class="panel-title">Warning - Privacy</h3>
+                </div>
+                <div class="panel-body">
+                    <p>Fitstats exposes your fitbit data to the internet.</p>
+                    <p>It has to do this in order for Status Board to access it, but it might have the side-effect of allowing others access to your information.</p>
+                    <p>The URLs used to expose your information are unguessable, and not linked to from any public page, but that does not make them secure.</p>
+                    <p>If this concerns you, do not use Fitstats.</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="http://code.jquery.com/jquery-1.10.1.min.js"></script>
+    <script src="//netdna.bootstrapcdn.com/bootstrap/3.1.1/js/bootstrap.min.js"></script>
+</div>
+</body>
+</html>

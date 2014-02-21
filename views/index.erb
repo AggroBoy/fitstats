@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset=”utf-8”> 
+<link rel="stylesheet" href="//netdna.bootstrapcdn.com/bootstrap/3.1.1/css/bootstrap.min.css">
+<link rel="stylesheet" href="//netdna.bootstrapcdn.com/bootstrap/3.1.1/css/bootstrap-theme.min.css">
+<title>Fitstats</title
+</head>
+<body>
+<div class="container">
+    <h1>Fitstats</h1>
+    <p class="lead">Fitbit tracking data in <a href="https://panic.com/statusboard/">Panic's Status Board</a></p>
+    <p>Welcome back <%= @user[:name] %>!
+    <% iPad = request.user_agent.include?("iPad") %>
+    <% if !iPad %>
+    <div class="alert alert-info">
+        If you were reading this on an iPad, all of the resource links below
+        would open directly in Status Board. Since you're not, you'll have to
+        find some other way of getting the JSON resource URLs into the App. I
+        recommend <a href"http://getbeamapp.com">Beam</a>.
+    </div>
+    <% end %>
+    <% feed_defaults = {"steps" => "1w", "floors" => "1w", "weight" => "1y", "calories" => "1w"} %>
+    <% feed_defaults.keys.each_with_index do |feed,index| %>
+        <% if index.modulo(2) == 0 %>
+            <% if index != 0 then %> </div> <% end %>
+            <div class="row">
+        <% end %>
+        <div class="col-sm-6">
+            <div class="panel panel-default">
+                <% base_url = "http://fitstats.null-terminated.org/stats/#{@user[:obfuscator]}/#{feed}" %>
+                <div class="panel-heading">
+                    <h3 class="panel-title">
+                        <a href="<%="panicboard://?url=" if iPad%><%=base_url%>/<%=feed_defaults[feed]%><%="&panel=graph&sourceDisplayName=Fitstats" if iPad%>"><%=feed.capitalize%></a>
+                    </h3>
+                </div>
+                <div class="panel-body">
+                    <% ALLOWED_SPANS.each_with_index do |span,span_index|%>
+                        <%= " - " if span_index != 0 %>
+                        <a href="<%="panicboard://?url=" if iPad%><%=base_url%>/<%=span%><%="&panel=graph&sourceDisplayName=Fitstats" if iPad%>">
+                            <%="<strong>" if span == feed_defaults[feed]%>
+                            <%=span%>
+                            <%="</strong>" if span == feed_defaults[feed]%>
+                        </a>
+                    <% end %>
+                </div>
+            </div>
+        </div>
+    <% end %>
+</div>
+
+<script src="http://code.jquery.com/jquery-1.10.1.min.js"></script>
+<script src="//netdna.bootstrapcdn.com/bootstrap/3.1.1/js/bootstrap.min.js"></script>
+</div>
+</body>
+</html>
