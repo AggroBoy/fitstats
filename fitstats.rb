@@ -330,9 +330,9 @@ def bmr
     age = (Date.today - @user[:birth_date]).to_i / 365.25
 
     if @user[:sex] == 'M'
-        1.2 * (88.362 + (13.397 * weight) + (4.799 * @user[:height]) - (5.677 * age))
+        88.362 + (13.397 * weight) + (4.799 * @user[:height]) - (5.677 * age)
     else
-        1.2 * (447.593 + (9.247 * weight) + (3.098 * @user[:height]) - (4.330 * age))
+        447.593 + (9.247 * weight) + (3.098 * @user[:height]) - (4.330 * age)
     end
 end
 
