@@ -169,16 +169,20 @@ def calorie_chart(time_span)
         deficit_future = Celluloid::Future.new {
             resiliant_request("deficit") { INTENSITIES[fitbit_client().daily_food_goal.values[0]["intensity"]] }
         }
+        activity_future = Celluloid::Future.new {
+            resiliant_request("activity") { fitbit_client().activities_on_date("today")["summary"]["activityCalories"].to_i }
+        }
 
         cals_in = cals_in_future.value
         cals_out = cals_out_future.value
         deficit = deficit_future.value
+        activity = activity_future.value
 
         datapoints = Array.new
         for i in 0 .. (cals_in.size - 1)
             date = cals_in[i]["dateTime"]
 
-            target = (Date.parse(date) == Date.today ? bmr() : cals_out[i]["value"]).to_i - deficit
+            target = ((Date.parse(date) == Date.today ? bmr() - activity : cals_out[i]["value"]).to_i) - deficit
 
             datapoints.push({
                 "title" => format_time(date, time_span),
@@ -326,13 +330,16 @@ end
 def bmr
     refresh_personal_info()
 
+    #TODO get weight from api!
     weight = 140
     age = (Date.today - @user[:birth_date]).to_i / 365.25
 
     if @user[:sex] == 'M'
         88.362 + (13.397 * weight) + (4.799 * @user[:height]) - (5.677 * age)
+        # (9.99 * weight) + (6.25 * @user[:height]) - (4.92 * age) + 5
     else
         447.593 + (9.247 * weight) + (3.098 * @user[:height]) - (4.330 * age)
+        # (9.99 * weight) + (6.25 * @user[:height]) - (4.92 * age) - 161
     end
 end
 
