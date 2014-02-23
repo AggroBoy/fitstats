@@ -114,11 +114,9 @@ end
 
 before "/stats/:obfuscator/:chart/:span" do
     @cache_key = "user#{@user[:id]}_#{params[:chart]}_#{params[:span]}"
-    puts "cache key: #{@cache_key}"
 end
 before "/stats/:obfuscator/:chart" do
     @cache_key = "user#{@user[:id]}_#{params[:chart]}"
-    puts "cache key: #{@cache_key}"
 end
 
 get "/stats/:obfuscator/weight" do
@@ -132,8 +130,8 @@ def format_time(time, time_span)
     ["1d", "7d", "1w"].include?(time_span) ? Time.parse(time).strftime("%a") : time
 end
 
-def clear_cache(user_id, chart)
-    cache_key = "user#{@user[:id]}_#{chart}"
+def invalidate_request_cache(user_id, chart)
+    cache_key = "user#{user_id}_#{chart}"
     CACHE.delete(cache_key)
     for span in ALLOWED_SPANS do
         CACHE.delete(cache_key + "_" + span)
@@ -178,10 +176,13 @@ def calorie_chart(time_span)
 
         datapoints = Array.new
         for i in 0 .. (cals_in.size - 1)
+            date = cals_in[i]["dateTime"]
+
+            target = (Date.parse(date) == Date.today ? bmr() : cals_out[i]["value"]).to_i - deficit
+
             datapoints.push({
-                # TODO: be cleverer about calorie distribution throughout the day (early-on, calories out will be WAY over target due to base burn not having happened yet)
-                "title" => format_time(cals_in[i]["dateTime"], time_span),
-                "value" => cals_in[i]["value"].to_i - (cals_out[i]["value"].to_i - deficit)
+                "title" => format_time(date, time_span),
+                "value" => cals_in[i]["value"].to_i - target
             })
         end
 
@@ -275,13 +276,13 @@ post "/api/subscriber-endpoint" do
     for update in MultiJson.load(params['updates'][:tempfile].read) do
         case update["collectionType"]
         when "activities" 
-            clear_cache(update["subscriptionId"], "steps")
-            clear_cache(update["subscriptionId"], "floors")
-            clear_cache(update["subscriptionId"], "calories")
+            invalidate_request_cache(update["subscriptionId"], "steps")
+            invalidate_request_cache(update["subscriptionId"], "floors")
+            invalidate_request_cache(update["subscriptionId"], "calories")
         when "foods"
-            clear_cache(update["subscriptionId"], "calories")
+            invalidate_request_cache(update["subscriptionId"], "calories")
         when "body"
-            clear_cache(update["subscriptionId"], "weight")
+            invalidate_request_cache(update["subscriptionId"], "weight")
         end
     end
 end
@@ -295,14 +296,18 @@ get "/auth/fitbit/callback" do
 
 
     users = DB[:user]
-    user = users[:fitbit_uid => fitbit_id]
+    @user = users[:fitbit_uid => fitbit_id]
 
-    if user
-        user.update( { :fitbit_oauth_token => token, :fitbit_oauth_secret => secret } )
+    if @user
+        @user.update( { :fitbit_oauth_token => token, :fitbit_oauth_secret => secret } )
     else
         users.insert({ :name => name, :fitbit_uid => fitbit_id, :fitbit_oauth_token => token, :fitbit_oauth_secret => secret, :obfuscator => SecureRandom.urlsafe_base64(64) })
     end
     session[:uid] = fitbit_id
+    #TODO: store personal data for later BMR calc.
+    
+    refresh_subscription
+
     redirect to('/')
 end
 
@@ -312,19 +317,48 @@ get '/auth/failure' do
 end
 
 
-
-get '/subs-test/:obfuscator/add' do
-    fitbit = fitbit_client()
-
-    fitbit.create_subscription(:type => :all, :subscription_id => 1)
+def refresh_personal_info
+    if (Date.today - @user[:personal_data_last_updated]).to_i > 28
+        #TODO: update personal data in DB
+    end
 end
 
+def bmr
+    refresh_personal_info()
 
-get '/subs-test/:obfuscator/list' do
-    fitbit = fitbit_client()
+    weight = 140
+    age = (Date.today - @user[:birth_date]).to_i / 365.25
 
-    MultiJson.encode fitbit.subscriptions(:type => :all)
+    if @user[:sex] == 'M'
+        1.2 * (88.362 + (13.397 * weight) + (4.799 * @user[:height]) - (5.677 * age))
+    else
+        1.2 * (447.593 + (9.247 * weight) + (3.098 * @user[:height]) - (4.330 * age))
+    end
 end
 
+get '/stats/:obfuscator/subscription' do
+    fitbit_client().subscriptions({:type => :all})
+end
 
+def add_subscription
+    fitbit.create_subscription({:type => :all, :subscription_id => @user[:id]})
+end
+
+def delete_subscription
+    fitbit = fitbit_client()
+    for subscription in fitbit.subscriptions({:type => :all}).values[0] do
+        fitbit.remove_subscription({:type => :all, :subscription_id => subscription["subscriptionId"]})
+    end
+end
+
+def refresh_subscription
+    delete_subscription
+    add_subscription
+end
+
+get '/stats/:obfuscator/refresh-subscription' do
+    refresh_subscriptions
+
+    redirect to ("stats/#{@user[:obfuscator]}/subscription")
+end
 
