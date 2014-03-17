@@ -222,6 +222,11 @@ def weight_chart(time_span)
         datapoints = Array.new
         weight.each { |item|
             datapoints.push( { "title" => item["dateTime"], "value" => item["value"] } )
+
+            if (item["dateTime"] == Date.today.to_s)
+                DB[:user].where(:fitbit_uid => session[:uid]).update( :weight => item["value"].to_f )
+                @user = DB[:user][:fitbit_uid => session[:uid]]
+            end
         }
 
         create_graph("Weight", {"weight" => datapoints}, 60, (weight_goal.to_f * 0.9).to_s, nil, "kg")
