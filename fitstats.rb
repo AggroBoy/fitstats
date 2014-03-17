@@ -9,6 +9,11 @@ require 'celluloid/autostart'
 require 'securerandom'
 require 'erubis'
 
+# TODO: LOCALIZATION
+# Specifically timezones:
+#   - time calculations need to work based on user's local time rather than UTC
+#   - date ranges need to be based on user's local date, not the date in Grenwich
+
 INTENSITIES = {
     "EASY" => 250,
     "MEDIUM" => 500,
@@ -67,7 +72,7 @@ module Fitgem
 
         def get(path, headers={})
             result = raw_get(path, headers)
-            raise result if @raise_on_error and !result.is_a?(Net::HTTPSuccess)
+            raise result.value() if @raise_on_error and !result.is_a?(Net::HTTPSuccess)
             extract_response_body result
         end
 
@@ -156,6 +161,16 @@ def simple_sequence_chart(resource, title, time_span)
     }
 end
 
+def extrapolate_todays_calories(current)
+    now = Time.now
+    mins_elapsed = now.min + (now.hour * 60)
+
+    bmr_per_min = bmr.to_f / 1440.0
+    mins_remaining = 1440 - mins_elapsed
+
+    (current + (mins_remaining * bmr_per_min)).to_i
+end
+
 def calorie_chart(time_span)
     CACHE.fetch(@cache_key) {
 
@@ -169,20 +184,17 @@ def calorie_chart(time_span)
         deficit_future = Celluloid::Future.new {
             resiliant_request("deficit") { INTENSITIES[fitbit_client().daily_food_goal.values[0]["intensity"]] }
         }
-        activity_future = Celluloid::Future.new {
-            resiliant_request("activity") { fitbit_client().activities_on_date("today")["summary"]["activityCalories"].to_i }
-        }
 
         cals_in = cals_in_future.value
         cals_out = cals_out_future.value
         deficit = deficit_future.value
-        activity = activity_future.value
 
         datapoints = Array.new
         for i in 0 .. (cals_in.size - 1)
             date = cals_in[i]["dateTime"]
 
-            target = ((Date.parse(date) == Date.today ? bmr() - activity : cals_out[i]["value"]).to_i) - deficit
+            daily_out = cals_out[i]["value"].to_i
+            target = (Date.parse(date) == Date.today ? extrapolate_todays_calories(daily_out) : daily_out) - deficit
 
             datapoints.push({
                 "title" => format_time(date, time_span),
@@ -308,38 +320,45 @@ get "/auth/fitbit/callback" do
         users.insert({ :name => name, :fitbit_uid => fitbit_id, :fitbit_oauth_token => token, :fitbit_oauth_secret => secret, :obfuscator => SecureRandom.urlsafe_base64(64) })
     end
     session[:uid] = fitbit_id
-    #TODO: store personal data for later BMR calc.
+    refresh_personal_info
     
     refresh_subscription
 
     redirect to('/')
 end
 
-# handle auath failure
+# handle oauth failure
 get '/auth/failure' do
     params[:message]
 end
 
 
-def refresh_personal_info
+def refresh_personal_info(force = false)
     if (Date.today - @user[:personal_data_last_updated]).to_i > 28
-        #TODO: update personal data in DB
+        info = fitbit_client.user_info["user"]
+        DB[:user].where(:fitbit_uid => session[:uid]).update(
+            :height => info["height"],
+            :weight => info["weight"],
+            :name => info["displayName"],
+            :sex => info["gender"],
+            :birth_date => info["dateOfBirth"],
+            :personal_data_last_updated => Date.today
+        )
+        @user = DB[:user][:fitbit_uid => session[:uid]]
     end
 end
 
 def bmr
     refresh_personal_info()
 
-    #TODO get weight from api!
-    weight = 140
-    age = (Date.today - @user[:birth_date]).to_i / 365.25
+    age = ((Date.today - @user[:birth_date]).to_i / 365.25).to_f
 
-    if @user[:sex] == 'M'
-        88.362 + (13.397 * weight) + (4.799 * @user[:height]) - (5.677 * age)
-        # (9.99 * weight) + (6.25 * @user[:height]) - (4.92 * age) + 5
+    if @user[:sex] == 'MALE'
+        # 88.362 + (13.397 * @user[:weight]) + (4.799 * @user[:height]) - (5.677 * age)
+        (9.99 * @user[:weight].to_f) + (6.25 * @user[:height].to_f) - (4.92 * age) + 5
     else
-        447.593 + (9.247 * weight) + (3.098 * @user[:height]) - (4.330 * age)
-        # (9.99 * weight) + (6.25 * @user[:height]) - (4.92 * age) - 161
+        # 447.593 + (9.247 * @user[:weight]) + (3.098 * @user[:height]) - (4.330 * age)
+        (9.99 * @user[:weight]) + (6.25 * @user[:height].to_i) - (4.92 * age) - 161
     end
 end
 
@@ -348,6 +367,7 @@ get '/stats/:obfuscator/subscription' do
 end
 
 def add_subscription
+    fitbit = fitbit_client()
     fitbit.create_subscription({:type => :all, :subscription_id => @user[:id]})
 end
 
@@ -367,5 +387,9 @@ get '/stats/:obfuscator/refresh-subscription' do
     refresh_subscriptions
 
     redirect to ("stats/#{@user[:obfuscator]}/subscription")
+end
+
+get '/stats/:obfuscator/test' do
+    halt 500
 end
 
