@@ -320,7 +320,10 @@ get "/auth/fitbit/callback" do
     @user = users[:fitbit_uid => fitbit_id]
 
     if @user
-        @user.update( { :fitbit_oauth_token => token, :fitbit_oauth_secret => secret } )
+        DB[:user].where(:fitbit_uid => fitbit_id).update(
+            { :fitbit_oauth_token => token, :fitbit_oauth_secret => secret }
+        )
+        @user = users[:fitbit_uid => fitbit_id]
     else
         users.insert({ :name => name, :fitbit_uid => fitbit_id, :fitbit_oauth_token => token, :fitbit_oauth_secret => secret, :obfuscator => SecureRandom.urlsafe_base64(64) })
         @user = users[:fitbit_uid => fitbit_id]
