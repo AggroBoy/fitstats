@@ -323,6 +323,7 @@ get "/auth/fitbit/callback" do
         @user.update( { :fitbit_oauth_token => token, :fitbit_oauth_secret => secret } )
     else
         users.insert({ :name => name, :fitbit_uid => fitbit_id, :fitbit_oauth_token => token, :fitbit_oauth_secret => secret, :obfuscator => SecureRandom.urlsafe_base64(64) })
+        @user = users[:fitbit_uid => fitbit_id]
     end
     session[:uid] = fitbit_id
     refresh_personal_info
