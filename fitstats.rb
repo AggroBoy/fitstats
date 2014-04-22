@@ -9,6 +9,10 @@ require 'celluloid/autostart'
 require 'securerandom'
 require 'erubis'
 
+require_relative 'lib/user.rb'
+require_relative 'lib/database.rb'
+require_relative 'lib/config.rb'
+
 # TODO: LOCALIZATION
 # Specifically timezones:
 #   - time calculations need to work based on user's local time rather than UTC
@@ -24,19 +28,15 @@ INTENSITIES = {
 ALLOWED_SPANS = [ "1d", "1w", "1m", "3m", "6m", "1y" ]
 # Other potentials: 7d, 30d
 
-OPTIONS = YAML.load_file("/etc/fitstats.rc")
-DB = Sequel.connect("mysql2://#{OPTIONS['db_user']}:#{OPTIONS['db_password']}@#{OPTIONS['db_host']}/#{OPTIONS['db_name']}")
+DB = Fitstats::Database.DB
+CONFIG = Fitstats::Config.instance
 
-def config(key)
-    DB[:config][:key => key][:value]
-end
+CONSUMER_KEY = CONFIG["fitbit_consumer_key"]
+CONSUMER_SECRET = CONFIG["fitbit_consumer_secret"]
 
-CONSUMER_KEY = config("fitbit_consumer_key")
-CONSUMER_SECRET = config("fitbit_consumer_secret")
+set :bind => CONFIG["bind_address"]
 
-set :bind => config("bind_address")
-
-use Rack::Session::Cookie, :secret => config("session_secret"), :expire_after => 2592000
+use Rack::Session::Cookie, :secret => CONFIG["session_secret"], :expire_after => 2592000
 use OmniAuth::Builder do
     provider :fitbit, CONSUMER_KEY, CONSUMER_SECRET
 end
