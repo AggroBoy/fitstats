@@ -1,47 +1,36 @@
 require 'sequel'
+require 'celluloid'
 
 require_relative 'database.rb'
 require_relative 'fitgem.rb'
 
-PI_FREQUENCY = 360
+INFO_FREQUENCY = 3600
+SERIES_FREQUENCY = 1800
+GOAL_FREQUENCY = 86400
+
+INTENSITIES = {
+    "EASY" => 250,
+    "MEDIUM" => 500,
+    "KINDAHARD" => 750,
+    "HARDER" => 1000
+}
 
 module Fitstats
     class User
 
-        attr_accessor :fitbit_uid
-        attr_accessor :id
+        attr_reader :fitbit_uid
+        attr_reader :id
 
-        @@DB = Fitstats::Database.DB
+        attr_reader :steps_series
+        attr_reader :floors_series
+        attr_reader :weight_series
+        attr_reader :calories_in_series
+        attr_reader :calories_out_series
+        attr_reader :body_weight_goal
+        attr_reader :calorie_deficit_goal
 
-        def self.for_obfuscator(obfuscator)
-            db_user = @@DB[:user][:obfuscator => obfuscator]
-            return nil if db_user.nil?
-
-            User.new(
-                db_user[:id],
-                db_user[:fitbit_uid],
-                db_user[:obfuscator],
-                db_user[:fitbit_oauth_token],
-                db_user[:fitbit_oauth_secret]
-            )
-        end
-        
-        def self.for_id(id)
-            db_user = @@DB[:user][:id => id]
-            return nil if db_user.nil?
-
-            User.new(
-                db_user[:id],
-                db_user[:fitbit_uid],
-                db_user[:obfuscator],
-                db_user[:fitbit_oauth_token],
-                db_user[:fitbit_oauth_secret]
-            )
-        end
-
-        def self.create_new(fitbit_uid, obfuscator, user_token, user_secret)
-            # TODO : implement the create user function
-        end
+        attr_accessor :user_token
+        attr_accessor :user_secret
 
         def initialize(id, fitbit_uid, obfuscator, user_token, user_secret)
             @id = id
@@ -50,15 +39,7 @@ module Fitstats
             @user_secret = user_secret
             @obfuscator = obfuscator
 
-        end
-
-        def update_auth(token, secret)
-            @user_token = token
-            @user_secret = secret
-
-            @@DB[:user].where(:id => @id).update(
-                { :fitbit_oauth_token => token, :fitbit_oauth_secret => secret }
-            )
+            refresh_fitbit_data
         end
 
         def fitbit
@@ -72,40 +53,27 @@ module Fitstats
             })
         end
 
-        def refresh_personal_info
-            if @personal_info.nil? or @pi_timestamp.nil? or (Time.now - @pi_timestamp).to_i > PI_FREQUENCY
-                puts "Refreshing personal info for #{@fitbit_uid}."
-                @pi_timestamp = Time.now
-                begin
-                    @personal_info = fitbit.user_info["user"]
-                rescue => e
-                    puts e
-                end
-            end
+        def invalidate_pi_cache
+            @pi_timestamp = nil
         end
 
         def name
-            refresh_personal_info
             @personal_info["displayName"]
         end
 
         def height
-            refresh_personal_info
             @personal_info["height"]
         end
 
         def weight
-            refresh_personal_info
             @personal_info["weight"]
         end
 
         def birth_date
-            refresh_personal_info
             @personal_info["dateOfBirth"]
         end
 
         def sex
-            refresh_personal_info
             @personal_info["gender"]
         end
 
@@ -119,6 +87,106 @@ module Fitstats
                 # 447.593 + (9.247 * @user[:weight]) + (3.098 * @user[:height]) - (4.330 * age)
                 (9.99 * weight.to_f) + (6.25 * height.to_i) - (4.92 * age) - 161
             end
+        end
+
+
+        def invalidate_ws_cache
+            @ws_timestamp = nil
+        end
+
+        def invalidate_ss_cache
+            @ss_timestamp = nil
+        end
+
+        def invalidate_fs_cache
+            @fs_timestamp = nil
+        end
+
+        def invalidate_cis_cache
+            @cis_timestamp = nil
+        end
+
+        def invalidate_cos_cache
+            @cos_timestamp = nil
+        end
+
+        def invalidate_cdg_cache
+            @cdg_timestamp = nil
+        end
+
+        def invalidate_bwg_cache
+            @bwg_timestamp = nil
+        end
+
+        def refresh_fitbit_data
+            futures = []
+
+            if @personal_info.nil? or @pi_timestamp.nil? or (Time.now - @pi_timestamp).to_i > INFO_FREQUENCY
+                puts "Refreshing personal info for #{@fitbit_uid}."
+                futures.push Celluloid::Future.new {
+                    @personal_info = fitbit.user_info["user"]
+                    @pi_timestamp = Time.now
+                }
+            end
+
+            if (@calories_out_series.nil? or @cos_timestamp.nil? or (Time.now - @cos_timestamp).to_i > SERIES_FREQUENCY)
+                puts "Refreshing calories out for #{@fitbit_uid}."
+                futures.push Celluloid::Future.new {
+                    @calories_out_series = parse_series(
+                        fitbit.data_by_time_range("/activities/tracker/calories", {:base_date => "today", :period => "1y"}).values[0]
+                    )
+                    @cos_timestamp = Time.now
+                }
+            end
+
+            if (@calories_in_series.nil? or @cis_timestamp.nil? or (Time.now - @cis_timestamp).to_i > SERIES_FREQUENCY)
+                puts "Refreshing calories in for #{@fitbit_uid}."
+                futures.push Celluloid::Future.new {
+                    @calories_in_series = parse_series(
+                        fitbit.data_by_time_range("/foods/log/caloriesIn", {:base_date => "today", :period => "1y"}).values[0]
+                    )
+                    @cis_timestamp = Time.now
+                }
+            end
+
+            if (@weight_series.nil? or @ws_timestamp.nil? or (Time.now - @ws_timestamp).to_i > SERIES_FREQUENCY)
+                puts "Refreshing weight for #{@fitbit_uid}."
+                futures.push Celluloid::Future.new {
+                    @weight_series = parse_series(
+                        fitbit.data_by_time_range("/body/weight", {:base_date => "today", :period => "1y"}).values[0]
+                    )
+                    @ws_timestamp = Time.now
+                }
+            end
+
+            if @body_weight_goal.nil? or @bwg_timestamp.nil? or (Time.now - @bwg_timestamp).to_i < GOAL_FREQUENCY
+                puts "Refreshing weight goal for #{@fitbit_uid}."
+                futures.push Celluloid::Future.new {
+                    @body_weight_goal = fitbit.body_weight_goal["goal"]["weight"] 
+                    @bwg_timestamp = Time.now
+                }
+            end
+
+            if @calorie_deficit_goal.nil? or @cdg_timestamp.nil? or (Time.now - @cdg_timestamp).to_i < GOAL_FREQUENCY
+                puts "Refreshing calorie deficit goal for #{@fitbit_uid}."
+                futures.push Celluloid::Future.new {
+                    @calorie_deficit_goal = INTENSITIES[fitbit.daily_food_goal.values[0]["intensity"]]
+                    @cdg_timestamp = Time.now
+                }
+            end
+
+            #Wait for the futures to complete; we don't care about the value
+            for future in futures
+                future.value
+            end
+        end
+
+        def parse_series(series)
+            items = {}
+            for item in series
+                items[Date.parse(item["dateTime"])] = item["value"]
+            end
+            items
         end
     end
 end
