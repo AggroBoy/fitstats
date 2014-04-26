@@ -10,7 +10,7 @@
 <div class="container">
     <h1>Fitstats</h1>
     <p class="lead">Fitbit tracking data in <a href="https://panic.com/statusboard/">Panic's Status Board</a></p>
-    <p>Welcome back <%= @user[:name] %>!
+    <p>Welcome back <%= @user.name %>!
     <% iPad = request.user_agent.include?("iPad") %>
     <% if !iPad %>
     <div class="alert alert-info">
@@ -28,7 +28,7 @@
         <% end %>
         <div class="col-sm-6">
             <div class="panel panel-default">
-                <% base_url = "http://fitstats.null-terminated.org/stats/#{@user[:obfuscator]}/#{feed}" %>
+                <% base_url = "http://fitstats.null-terminated.org/stats/#{@user.obfuscator}/#{feed}" %>
                 <div class="panel-heading">
                     <h3 class="panel-title">
                         <a href="<%="panicboard://?url=" if iPad%><%=base_url%>/<%=feed_defaults[feed]%><%="&panel=graph&sourceDisplayName=Fitstats" if iPad%>"><%=feed.capitalize%></a>

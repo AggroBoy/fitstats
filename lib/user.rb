@@ -20,6 +20,7 @@ module Fitstats
 
         attr_reader :fitbit_uid
         attr_reader :id
+        attr_reader :obfuscator
 
         attr_reader :steps_series
         attr_reader :floors_series
@@ -124,7 +125,7 @@ module Fitstats
             if @personal_info.nil? or @pi_timestamp.nil? or (Time.now - @pi_timestamp).to_i > INFO_FREQUENCY
                 puts "Refreshing personal info for #{@fitbit_uid}."
                 futures.push Celluloid::Future.new {
-                    @personal_info = fitbit.user_info["user"]
+                    @personal_info = CACHE.fetch("bwaaa-pi") { fitbit.user_info["user"] }
                     @pi_timestamp = Time.now
                 }
             end
@@ -132,19 +133,39 @@ module Fitstats
             if (@calories_out_series.nil? or @cos_timestamp.nil? or (Time.now - @cos_timestamp).to_i > SERIES_FREQUENCY)
                 puts "Refreshing calories out for #{@fitbit_uid}."
                 futures.push Celluloid::Future.new {
-                    @calories_out_series = parse_series(
+                    @calories_out_series = CACHE.fetch("bwaaa-cos") { parse_series(
                         fitbit.data_by_time_range("/activities/tracker/calories", {:base_date => "today", :period => "1y"}).values[0]
-                    )
+                    )}
                     @cos_timestamp = Time.now
+                }
+            end
+
+            if (@steps_series.nil? or @ss_timestamp.nil? or (Time.now - @ss_timestamp).to_i > SERIES_FREQUENCY)
+                puts "Refreshing calories out for #{@fitbit_uid}."
+                futures.push Celluloid::Future.new {
+                    @steps_series = CACHE.fetch("bwaaa-ss") { parse_series(
+                        fitbit.data_by_time_range("/activities/tracker/steps", {:base_date => "today", :period => "1y"}).values[0]
+                    )}
+                    @ss_timestamp = Time.now
+                }
+            end
+
+            if (@floors_series.nil? or @fs_timestamp.nil? or (Time.now - @fs_timestamp).to_i > SERIES_FREQUENCY)
+                puts "Refreshing calories out for #{@fitbit_uid}."
+                futures.push Celluloid::Future.new {
+                    @floors_series = CACHE.fetch("bwaaa-fs") { parse_series(
+                        fitbit.data_by_time_range("/activities/tracker/floors", {:base_date => "today", :period => "1y"}).values[0]
+                    )}
+                    @fs_timestamp = Time.now
                 }
             end
 
             if (@calories_in_series.nil? or @cis_timestamp.nil? or (Time.now - @cis_timestamp).to_i > SERIES_FREQUENCY)
                 puts "Refreshing calories in for #{@fitbit_uid}."
                 futures.push Celluloid::Future.new {
-                    @calories_in_series = parse_series(
+                    @calories_in_series = CACHE.fetch("bwaaa-cis") { parse_series(
                         fitbit.data_by_time_range("/foods/log/caloriesIn", {:base_date => "today", :period => "1y"}).values[0]
-                    )
+                    )}
                     @cis_timestamp = Time.now
                 }
             end
@@ -152,9 +173,9 @@ module Fitstats
             if (@weight_series.nil? or @ws_timestamp.nil? or (Time.now - @ws_timestamp).to_i > SERIES_FREQUENCY)
                 puts "Refreshing weight for #{@fitbit_uid}."
                 futures.push Celluloid::Future.new {
-                    @weight_series = parse_series(
+                    @weight_series = CACHE.fetch("bwaaa-ws") { parse_series(
                         fitbit.data_by_time_range("/body/weight", {:base_date => "today", :period => "1y"}).values[0]
-                    )
+                    )}
                     @ws_timestamp = Time.now
                 }
             end
@@ -162,7 +183,7 @@ module Fitstats
             if @body_weight_goal.nil? or @bwg_timestamp.nil? or (Time.now - @bwg_timestamp).to_i < GOAL_FREQUENCY
                 puts "Refreshing weight goal for #{@fitbit_uid}."
                 futures.push Celluloid::Future.new {
-                    @body_weight_goal = fitbit.body_weight_goal["goal"]["weight"] 
+                    @body_weight_goal = CACHE.fetch("bwaaa-bwg") { fitbit.body_weight_goal["goal"]["weight"] }
                     @bwg_timestamp = Time.now
                 }
             end
@@ -170,7 +191,7 @@ module Fitstats
             if @calorie_deficit_goal.nil? or @cdg_timestamp.nil? or (Time.now - @cdg_timestamp).to_i < GOAL_FREQUENCY
                 puts "Refreshing calorie deficit goal for #{@fitbit_uid}."
                 futures.push Celluloid::Future.new {
-                    @calorie_deficit_goal = INTENSITIES[fitbit.daily_food_goal.values[0]["intensity"]]
+                    @calorie_deficit_goal = CACHE.fetch("bwaaa-cdg") { INTENSITIES[fitbit.daily_food_goal.values[0]["intensity"]] }
                     @cdg_timestamp = Time.now
                 }
             end
@@ -182,11 +203,7 @@ module Fitstats
         end
 
         def parse_series(series)
-            items = {}
-            for item in series
-                items[Date.parse(item["dateTime"])] = item["value"]
-            end
-            items
+            series
         end
     end
 end

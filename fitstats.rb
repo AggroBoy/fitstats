@@ -44,9 +44,8 @@ end
 
 CACHE = Dalli::Client.new('127.0.0.1:11211', {:namespace => "fitstats_v0.1", :compress => "true", :expires_in => 1200})
 
-
 get "/" do
-    @user = DB[:user][:fitbit_uid => session[:uid]]
+    @user = Fitstats::Database.instance.user_for_fitbit_uid(session[:uid])
     if @user then
         erb :index
     else
@@ -60,8 +59,8 @@ def fitbit_client()
     Fitgem::Client.new ({
         :consumer_key => CONSUMER_KEY,
         :consumer_secret => CONSUMER_SECRET,
-        :token => @user[:fitbit_oauth_token],
-        :secret => @user[:fitbit_oauth_secret],
+        :token => @ouser[:fitbit_oauth_token],
+        :secret => @ouser[:fitbit_oauth_secret],
         :unit_system => Fitgem::ApiUnitSystem.METRIC,
         :raise_on_error => true
     })
@@ -69,7 +68,7 @@ end
 
 
 before '/stats/:obfuscator/*' do
-    @user = DB[:user][:obfuscator => params[:obfuscator]]
+    @user = Fitstats::Database.instance.user_for_obfuscator(params[:obfuscator])
     halt 404 if !@user
 end
 
@@ -78,10 +77,10 @@ before '/stats/:obfuscator/*/:span' do
 end
 
 before "/stats/:obfuscator/:chart/:span" do
-    @cache_key = "user#{@user[:id]}_#{params[:chart]}_#{params[:span]}"
+    #@cache_key = "user#{@ouser[:id]}_#{params[:chart]}_#{params[:span]}"
 end
 before "/stats/:obfuscator/:chart" do
-    @cache_key = "user#{@user[:id]}_#{params[:chart]}"
+    #@cache_key = "user#{@ouser[:id]}_#{params[:chart]}"
 end
 
 get "/stats/:obfuscator/weight" do
@@ -92,7 +91,7 @@ get "/stats/:obfuscator/weight/:span" do
 end
 
 def format_time(time, time_span)
-    ["1d", "7d", "1w"].include?(time_span) ? Time.parse(time).strftime("%a") : time
+    ["1d", "7d", "1w"].include?(time_span) ? Time.parse(time).strftime("%a") : time_span
 end
 
 def invalidate_request_cache(user_id, chart)
@@ -103,51 +102,25 @@ def invalidate_request_cache(user_id, chart)
     end
 end
 
-def simple_sequence_chart(resource, title, time_span)
-    fitbit = fitbit_client()
-
-    CACHE.fetch(@cache_key) {
-        steps = resiliant_request { fitbit.data_by_time_range(resource, {:base_date => "today", :period => time_span}).values[0] }
-
-        datapoints = Array.new
-        steps.each { |item|
-            datapoints.push( {
-                "title" => format_time(item["dateTime"], time_span),
-                "value" => item["value"]
-            } )
-        }
-
-        create_graph(title, {"fitbit" => datapoints}, 60)
-    }
+def simple_sequence_chart(title, series, time_span)
+    create_graph(title, {"fitbit" => prepare_series(series, time_span)}, 60)
 end
 
 def extrapolate_todays_calories(current)
     now = Time.now
     mins_elapsed = now.min + (now.hour * 60)
 
-    bmr_per_min = bmr.to_f / 1440.0
+    bmr_per_min = @user.bmr.to_f / 1440.0
     mins_remaining = 1440 - mins_elapsed
 
     (current + (mins_remaining * bmr_per_min)).to_i
 end
 
 def calorie_chart(time_span)
-    CACHE.fetch(@cache_key) {
 
-        # Use futures to parallelize http requests
-        cals_in_future = Celluloid::Future.new {
-            resiliant_request("in") { fitbit_client().data_by_time_range("/foods/log/caloriesIn", {:base_date => "today", :period => time_span}).values[0] }
-        }
-        cals_out_future = Celluloid::Future.new {
-            resiliant_request("out") { fitbit_client().data_by_time_range("/activities/tracker/calories", {:base_date => "today", :period => time_span}).values[0] }
-        }
-        deficit_future = Celluloid::Future.new {
-            resiliant_request("deficit") { INTENSITIES[fitbit_client().daily_food_goal.values[0]["intensity"]] }
-        }
-
-        cals_in = cals_in_future.value
-        cals_out = cals_out_future.value
-        deficit = deficit_future.value
+        cals_in = @user.calories_in_series.select { |item| Date.parse(item["dateTime"]) > cutoff_date_for_span(time_span)}
+        cals_out = @user.calories_out_series.select { |item| Date.parse(item["dateTime"]) > cutoff_date_for_span(time_span)}
+        deficit = @user.calorie_deficit_goal
 
         datapoints = Array.new
         for i in 0 .. (cals_in.size - 1)
@@ -163,34 +136,13 @@ def calorie_chart(time_span)
         end
 
         create_graph("calories", {"food" => datapoints}, 60)
-    }
 end
 
 def weight_chart(time_span)
-    CACHE.fetch(@cache_key, 10800) {
+    weight_series = prepare_series(@user.weight_series,  time_span)
+    weight_goal = @user.body_weight_goal
 
-        weight_future = Celluloid::Future.new {
-           resiliant_request("weight") { fitbit_client().data_by_time_range("/body/weight", {:base_date => "today", :period => time_span}).values[0] }
-        }
-        weight_goal_future = Celluloid::Future.new {
-            resiliant_request("goal") { fitbit_client().body_weight_goal["goal"]["weight"] }
-        }
-
-        weight = weight_future.value
-        weight_goal = weight_goal_future.value
-
-        datapoints = Array.new
-        weight.each { |item|
-            datapoints.push( { "title" => item["dateTime"], "value" => item["value"] } )
-
-            if (item["dateTime"] == Date.today.to_s)
-                DB[:user].where(:fitbit_uid => session[:uid]).update( :weight => item["value"].to_f )
-                @user = DB[:user][:fitbit_uid => session[:uid]]
-            end
-        }
-
-        create_graph("Weight", {"weight" => datapoints}, 60, (weight_goal.to_f * 0.9).to_s, nil, "kg")
-    }
+    create_graph("Weight", {"weight" => weight_series}, 60, (weight_goal.to_f * 0.9).to_s, nil, "kg")
 end
 
 def create_graph(title, sequences, refresh_interval, y_min = nil, y_max = nil, y_unit = nil)
@@ -219,30 +171,50 @@ def create_graph(title, sequences, refresh_interval, y_min = nil, y_max = nil, y
     MultiJson.encode( graph )
 end
 
-def resiliant_request(request_name = nil)
-    begin
-        key = @cache_key + (request_name ? "_" + request_name : "") + "_request"
-        new = yield
-        CACHE.set(key, new, 86400)
-        new
-    rescue => e
-        e.backtrace
-        CACHE.get(key) or raise
+def cutoff_date_for_span(time_span)
+    case time_span
+    when "1d"
+        return Date.today - 1
+    when "1w"
+        return Date.today - 7
+    when "1m"
+        return Date.today << 1
+    when "3m"
+        return Date.today << 3
+    when "6m"
+        return Date.today << 6
+    when "1y"
+        return Date.today << 12
     end
+
+    Date.today - 7
+end
+
+def prepare_series(series, time_span)
+    datapoints = Array.new
+    series.select{ |item|
+        Date.parse(item["dateTime"]) > cutoff_date_for_span(time_span)
+    }.each { |item|
+        datapoints.push( {
+            "title" => format_time(item["dateTime"], time_span),
+            "value" => item["value"]
+        } )
+    }
+    datapoints
 end
 
 get "/stats/:obfuscator/steps" do
-    simple_sequence_chart("/activities/tracker/steps", "steps", "7d")
+    simple_sequence_chart("Steps", @user.steps_series, "7d")
 end
 get "/stats/:obfuscator/steps/:span" do
-    simple_sequence_chart("/activities/tracker/steps", "steps", params[:span])
+    simple_sequence_chart("Steps", @user.steps_series, params[:span])
 end
 
 get "/stats/:obfuscator/floors" do
-    simple_sequence_chart("/activities/tracker/floors", "floors", "7d")
+    simple_sequence_chart("Floors", @user.floors_series, "7d")
 end
 get "/stats/:obfuscator/floors/:span" do
-    simple_sequence_chart("/activities/tracker/floors", "floors", params[:span])
+    simple_sequence_chart("Floors", @user.floors_series, "7d")
 end
 
 get "/stats/:obfuscator/calories" do
@@ -277,16 +249,16 @@ get "/auth/fitbit/callback" do
 
 
     users = DB[:user]
-    @user = users[:fitbit_uid => fitbit_id]
+    @ouser = users[:fitbit_uid => fitbit_id]
 
-    if @user
+    if @ouser
         DB[:user].where(:fitbit_uid => fitbit_id).update(
             { :fitbit_oauth_token => token, :fitbit_oauth_secret => secret }
         )
-        @user = users[:fitbit_uid => fitbit_id]
+        @ouser = users[:fitbit_uid => fitbit_id]
     else
         users.insert({ :name => name, :fitbit_uid => fitbit_id, :fitbit_oauth_token => token, :fitbit_oauth_secret => secret, :obfuscator => SecureRandom.urlsafe_base64(64) })
-        @user = users[:fitbit_uid => fitbit_id]
+        @ouser = users[:fitbit_uid => fitbit_id]
     end
     session[:uid] = fitbit_id
     refresh_personal_info
@@ -303,7 +275,7 @@ end
 
 
 def refresh_personal_info(force = false)
-    if (Date.today - @user[:personal_data_last_updated]).to_i > 28
+    if (Date.today - @ouser[:personal_data_last_updated]).to_i > 28
         info = fitbit_client.user_info["user"]
         DB[:user].where(:fitbit_uid => session[:uid]).update(
             :height => info["height"],
@@ -313,21 +285,7 @@ def refresh_personal_info(force = false)
             :birth_date => info["dateOfBirth"],
             :personal_data_last_updated => Date.today
         )
-        @user = DB[:user][:fitbit_uid => session[:uid]]
-    end
-end
-
-def bmr
-    refresh_personal_info()
-
-    age = ((Date.today - @user[:birth_date]).to_i / 365.25).to_f
-
-    if @user[:sex] == 'MALE'
-        # 88.362 + (13.397 * @user[:weight]) + (4.799 * @user[:height]) - (5.677 * age)
-        (9.99 * @user[:weight].to_f) + (6.25 * @user[:height].to_f) - (4.92 * age) + 5
-    else
-        # 447.593 + (9.247 * @user[:weight]) + (3.098 * @user[:height]) - (4.330 * age)
-        (9.99 * @user[:weight]) + (6.25 * @user[:height].to_i) - (4.92 * age) - 161
+        @ouser = DB[:user][:fitbit_uid => session[:uid]]
     end
 end
 
@@ -337,7 +295,7 @@ end
 
 def add_subscription
     fitbit = fitbit_client()
-    fitbit.create_subscription({:type => :all, :subscription_id => @user[:id]})
+    fitbit.create_subscription({:type => :all, :subscription_id => @ouser[:id]})
 end
 
 def delete_subscription
@@ -355,7 +313,7 @@ end
 get '/stats/:obfuscator/refresh-subscription' do
     refresh_subscriptions
 
-    redirect to ("stats/#{@user[:obfuscator]}/subscription")
+    redirect to ("stats/#{@ouser[:obfuscator]}/subscription")
 end
 
 get '/stats/:obfuscator/test' do
