@@ -7,7 +7,7 @@ module Fitstats
         include Singleton
 
         def [](key)
-            Fitstats::Database.DB[:config][:key => key][:value]
+            Fitstats::Database.instance.db[:config][:key => key][:value]
         end
     end
 end

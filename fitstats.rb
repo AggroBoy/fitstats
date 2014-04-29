@@ -18,17 +18,9 @@ require_relative 'lib/fitgem.rb'
 #   - time calculations need to work based on user's local time rather than UTC
 #   - date ranges need to be based on user's local date, not the date in Grenwich
 
-INTENSITIES = {
-    "EASY" => 250,
-    "MEDIUM" => 500,
-    "KINDAHARD" => 750,
-    "HARDER" => 1000
-}
-
 ALLOWED_SPANS = [ "1d", "1w", "1m", "3m", "6m", "1y" ]
 # Other potentials: 7d, 30d
 
-DB = Fitstats::Database.DB
 CONFIG = Fitstats::Config.instance
 
 CONSUMER_KEY = CONFIG["fitbit_consumer_key"]
@@ -42,10 +34,13 @@ use OmniAuth::Builder do
 end
 
 
-CACHE = Dalli::Client.new('127.0.0.1:11211', {:namespace => "fitstats_v0.1", :compress => "true", :expires_in => 1200})
+def log (line)
+    puts "#{Time.now} : #{line}"
+end
 
 get "/" do
     @user = Fitstats::Database.instance.user_for_fitbit_uid(session[:uid])
+    @user.refresh_fitbit_data
     if @user then
         erb :index
     else
@@ -57,6 +52,7 @@ end
 
 before '/stats/:obfuscator/*' do
     @user = Fitstats::Database.instance.user_for_obfuscator(params[:obfuscator])
+    @user.refresh_fitbit_data
     halt 404 if !@user
 end
 
@@ -72,15 +68,7 @@ get "/stats/:obfuscator/weight/:span" do
 end
 
 def format_time(time, time_span)
-    ["1d", "7d", "1w"].include?(time_span) ? Time.parse(time).strftime("%a") : time_span
-end
-
-def invalidate_request_cache(user_id, chart)
-    cache_key = "user#{user_id}_#{chart}"
-    CACHE.delete(cache_key)
-    for span in ALLOWED_SPANS do
-        CACHE.delete(cache_key + "_" + span)
-    end
+    ["1d", "7d", "1w"].include?(time_span) ? Time.parse(time).strftime("%a") : time
 end
 
 def simple_sequence_chart(title, series, time_span)
@@ -120,7 +108,7 @@ def calorie_chart(time_span)
 end
 
 def weight_chart(time_span)
-    weight_series = prepare_series(@user.weight_series,  time_span)
+    weight_series = prepare_series(@user.weight_series, time_span)
     weight_goal = @user.body_weight_goal
 
     create_graph("Weight", {"weight" => weight_series}, 60, (weight_goal.to_f * 0.9).to_s, nil, "kg")
@@ -208,15 +196,20 @@ end
 post "/api/subscriber-endpoint" do
     status 204
     for update in MultiJson.load(params['updates'][:tempfile].read) do
+        user = Fitstats::Database.instance.user_for_id(update["subscriptionId"])
         case update["collectionType"]
         when "activities" 
-            #invalidate_request_cache(update["subscriptionId"], "steps")
-            #invalidate_request_cache(update["subscriptionId"], "floors")
-            #invalidate_request_cache(update["subscriptionId"], "calories")
+            log "subscription hit: activities"
+            user.invalidate_ss_cache
+            user.invalidate_fs_cache
         when "foods"
-            #invalidate_request_cache(update["subscriptionId"], "calories")
+            log "subscription hit: food"
+            user.invalidate_cis_cache
+            user.invalidate_cos_cache
         when "body"
-            #invalidate_request_cache(update["subscriptionId"], "weight")
+            log "subscription hit: body"
+            user.invalidate_ws_cache
+            user.invalidate_pi_cache
         end
     end
 end
@@ -228,16 +221,17 @@ get "/auth/fitbit/callback" do
     token = auth["credentials"]["token"]
     secret = auth["credentials"]["secret"]
         
-    @user = Database.user_for_fitbit_uid(fitbit_id) or 
-
-    if (user.nil?)
-        @user = Database.create_new_user(fitbit_id, SecureRandom.urlsafe_base64(64), token, secret)
+    if Fitstats::Database.instance.user_exists?(fitbit_id)
+        Fitstats::Database.instance.update_user_auth(fitbit_id, token, secret)
     else
-        Database.update_user_auth(@user)
+        Fitstats::Database.instance.create_new_user(fitbit_id, SecureRandom.urlsafe_base64(64), token, secret)
     end
 
+    Fitstats::Database.instance.purge_cache(fitbit_id)
+    @user = Fitstats::Database.instance.user_for_fitbit_uid(fitbit_id)
+
     session[:uid] = fitbit_id
-    refresh_subscriptions
+    refresh_subscription
 
     redirect to('/')
 end
@@ -261,11 +255,11 @@ end
 
 def refresh_subscription
     delete_subscription
-    add_subscription
+    create_subscription
 end
 
 get '/stats/:obfuscator/refresh-subscription' do
-    refresh_subscriptions
+    refresh_subscription
 
     redirect to ("stats/#{@user.obfuscator}/subscription")
 end
