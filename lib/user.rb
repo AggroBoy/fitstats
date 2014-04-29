@@ -205,6 +205,21 @@ module Fitstats
         def parse_series(series)
             series
         end
+
+        def subscriptions
+            fitbit.subscriptions({:type => :all})
+        end
+
+        def delete_subscription
+            for subscription in fitbit.subscriptions({:type => :all}).values[0] do
+                fitbit.remove_subscription({:type => :all, :subscription_id => subscription["subscriptionId"]})
+            end
+        end
+
+        def create_subscription
+            fitbit = fitbit_client()
+            fitbit.create_subscription({:type => :all, :subscription_id => id})
+        end
     end
 end
 

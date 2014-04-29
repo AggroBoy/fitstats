@@ -55,18 +55,6 @@ get "/" do
 end
 
 
-def fitbit_client()
-    Fitgem::Client.new ({
-        :consumer_key => CONSUMER_KEY,
-        :consumer_secret => CONSUMER_SECRET,
-        :token => @ouser[:fitbit_oauth_token],
-        :secret => @ouser[:fitbit_oauth_secret],
-        :unit_system => Fitgem::ApiUnitSystem.METRIC,
-        :raise_on_error => true
-    })
-end
-
-
 before '/stats/:obfuscator/*' do
     @user = Fitstats::Database.instance.user_for_obfuscator(params[:obfuscator])
     halt 404 if !@user
@@ -74,13 +62,6 @@ end
 
 before '/stats/:obfuscator/*/:span' do
     halt 404 if !ALLOWED_SPANS.include?(params[:span])
-end
-
-before "/stats/:obfuscator/:chart/:span" do
-    #@cache_key = "user#{@ouser[:id]}_#{params[:chart]}_#{params[:span]}"
-end
-before "/stats/:obfuscator/:chart" do
-    #@cache_key = "user#{@ouser[:id]}_#{params[:chart]}"
 end
 
 get "/stats/:obfuscator/weight" do
@@ -229,41 +210,34 @@ post "/api/subscriber-endpoint" do
     for update in MultiJson.load(params['updates'][:tempfile].read) do
         case update["collectionType"]
         when "activities" 
-            invalidate_request_cache(update["subscriptionId"], "steps")
-            invalidate_request_cache(update["subscriptionId"], "floors")
-            invalidate_request_cache(update["subscriptionId"], "calories")
+            #invalidate_request_cache(update["subscriptionId"], "steps")
+            #invalidate_request_cache(update["subscriptionId"], "floors")
+            #invalidate_request_cache(update["subscriptionId"], "calories")
         when "foods"
-            invalidate_request_cache(update["subscriptionId"], "calories")
+            #invalidate_request_cache(update["subscriptionId"], "calories")
         when "body"
-            invalidate_request_cache(update["subscriptionId"], "weight")
+            #invalidate_request_cache(update["subscriptionId"], "weight")
         end
     end
 end
 
 get "/auth/fitbit/callback" do
+
     auth = request.env['omniauth.auth']
-    name = auth["info"]["display_name"]
     fitbit_id = auth["uid"]
     token = auth["credentials"]["token"]
     secret = auth["credentials"]["secret"]
+        
+    @user = Database.user_for_fitbit_uid(fitbit_id) or 
 
-
-    users = DB[:user]
-    @ouser = users[:fitbit_uid => fitbit_id]
-
-    if @ouser
-        DB[:user].where(:fitbit_uid => fitbit_id).update(
-            { :fitbit_oauth_token => token, :fitbit_oauth_secret => secret }
-        )
-        @ouser = users[:fitbit_uid => fitbit_id]
+    if (user.nil?)
+        @user = Database.create_new_user(fitbit_id, SecureRandom.urlsafe_base64(64), token, secret)
     else
-        users.insert({ :name => name, :fitbit_uid => fitbit_id, :fitbit_oauth_token => token, :fitbit_oauth_secret => secret, :obfuscator => SecureRandom.urlsafe_base64(64) })
-        @ouser = users[:fitbit_uid => fitbit_id]
+        Database.update_user_auth(@user)
     end
+
     session[:uid] = fitbit_id
-    refresh_personal_info
-    
-    refresh_subscription
+    refresh_subscriptions
 
     redirect to('/')
 end
@@ -273,36 +247,16 @@ get '/auth/failure' do
     params[:message]
 end
 
-
-def refresh_personal_info(force = false)
-    if (Date.today - @ouser[:personal_data_last_updated]).to_i > 28
-        info = fitbit_client.user_info["user"]
-        DB[:user].where(:fitbit_uid => session[:uid]).update(
-            :height => info["height"],
-            :weight => info["weight"],
-            :name => info["displayName"],
-            :sex => info["gender"],
-            :birth_date => info["dateOfBirth"],
-            :personal_data_last_updated => Date.today
-        )
-        @ouser = DB[:user][:fitbit_uid => session[:uid]]
-    end
-end
-
 get '/stats/:obfuscator/subscription' do
-    fitbit_client().subscriptions({:type => :all})
+    @user.subscriptions
 end
 
-def add_subscription
-    fitbit = fitbit_client()
-    fitbit.create_subscription({:type => :all, :subscription_id => @ouser[:id]})
+def create_subscription
+    @user.create_subscription
 end
 
 def delete_subscription
-    fitbit = fitbit_client()
-    for subscription in fitbit.subscriptions({:type => :all}).values[0] do
-        fitbit.remove_subscription({:type => :all, :subscription_id => subscription["subscriptionId"]})
-    end
+    @user.delete_subscription
 end
 
 def refresh_subscription
@@ -313,7 +267,7 @@ end
 get '/stats/:obfuscator/refresh-subscription' do
     refresh_subscriptions
 
-    redirect to ("stats/#{@ouser[:obfuscator]}/subscription")
+    redirect to ("stats/#{@user.obfuscator}/subscription")
 end
 
 get '/stats/:obfuscator/test' do
