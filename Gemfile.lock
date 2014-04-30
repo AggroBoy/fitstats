@@ -3,7 +3,6 @@ GEM
   specs:
     celluloid (0.15.2)
       timers (~> 1.1.0)
-    dalli (2.7.0)
     erubis (2.7.0)
     fitgem (0.9.0)
       oauth
@@ -22,6 +21,7 @@ GEM
     omniauth-oauth (1.0.1)
       oauth
       omniauth (~> 1.0)
+    psych (2.0.5)
     rack (1.5.2)
     rack-protection (1.5.2)
       rack
@@ -44,7 +44,6 @@ PLATFORMS
 DEPENDENCIES
   bundler
   celluloid
-  dalli
   erubis
   fitgem
   kgio
@@ -52,6 +51,7 @@ DEPENDENCIES
   mysql2
   omniauth
   omniauth-fitbit
+  psych
   sequel
   sinatra
   unicorn
