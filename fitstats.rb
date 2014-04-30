@@ -202,10 +202,10 @@ post "/api/subscriber-endpoint" do
             log "subscription hit: activities"
             user.invalidate_ss_cache
             user.invalidate_fs_cache
+            user.invalidate_cos_cache
         when "foods"
             log "subscription hit: food"
             user.invalidate_cis_cache
-            user.invalidate_cos_cache
         when "body"
             log "subscription hit: body"
             user.invalidate_ws_cache
