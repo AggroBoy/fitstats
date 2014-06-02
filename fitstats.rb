@@ -1,6 +1,5 @@
 require 'sinatra'
 require 'omniauth-fitbit'
-require 'dalli'
 require 'securerandom'
 require 'sequel'
 require 'yaml'
