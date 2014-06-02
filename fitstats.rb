@@ -39,8 +39,8 @@ end
 
 get "/" do
     @user = Fitstats::Database.instance.user_for_fitbit_uid(session[:uid])
-    @user.refresh_fitbit_data
     if @user then
+        @user.refresh_fitbit_data
         erb :index
     else
         erb :login
