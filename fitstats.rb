@@ -94,7 +94,7 @@ def calorie_chart(time_span)
         for i in 0 .. (cals_in.size - 1)
             date = cals_in[i]["dateTime"]
 
-            daily_out = cals_out[i]["value"].to_i
+            daily_out = (cals_out[i]["value"].to_i || 0)
             target = (Date.parse(date) == Date.today ? extrapolate_todays_calories(daily_out) : daily_out) - deficit
 
             datapoints.push({
