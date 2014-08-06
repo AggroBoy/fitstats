@@ -48,6 +48,7 @@ module Fitstats
                 :token => @user_token,
                 :secret => @user_secret,
                 :unit_system => Fitgem::ApiUnitSystem.METRIC,
+                :ssl => true,
                 :raise_on_error => true
             })
         end
