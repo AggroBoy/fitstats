@@ -203,6 +203,7 @@ post "/api/subscriber-endpoint" do
             user.invalidate_ss_cache
             user.invalidate_fs_cache
             user.invalidate_cos_cache
+            user.invalidate_gl_cache
         when "foods"
             log "subscription hit: food"
             user.invalidate_cis_cache
@@ -210,6 +211,8 @@ post "/api/subscriber-endpoint" do
             log "subscription hit: body"
             user.invalidate_ws_cache
             user.invalidate_pi_cache
+            user.invalidate_bwg_cache
+            user.invalidate_cdg_cache
         end
     end
 end
