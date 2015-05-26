@@ -70,8 +70,8 @@ def format_time(time, time_span)
     ["1d", "7d", "1w"].include?(time_span) ? Time.parse(time).strftime("%a") : time
 end
 
-def simple_sequence_chart(title, series, time_span)
-    create_graph(title, {"fitbit" => prepare_series(series, time_span)}, 60)
+def simple_sequence_chart(title, series, time_span, goal = nil)
+    create_graph(title, {"fitbit" => prepare_series(series, time_span)}, 60, goal)
 end
 
 def extrapolate_todays_calories(current)
@@ -110,10 +110,10 @@ def weight_chart(time_span)
     weight_series = prepare_series(@user.weight_series, time_span)
     weight_goal = @user.body_weight_goal
 
-    create_graph("Weight", {"weight" => weight_series}, 60, (weight_goal.to_f * 0.9).to_s, nil, "kg")
+    create_graph("Weight", {"weight" => weight_series}, 60, @user.body_weight_goal, (weight_goal.to_f * 0.9).to_s, nil, "kg")
 end
 
-def create_graph(title, sequences, refresh_interval, y_min = nil, y_max = nil, y_unit = nil)
+def create_graph(title, sequences, refresh_interval, goal = nil, y_min = nil, y_max = nil, y_unit = nil)
     graph = {
         "graph" => {
             "title" => title,
@@ -127,8 +127,9 @@ def create_graph(title, sequences, refresh_interval, y_min = nil, y_max = nil, y
         }
     }
     
-    if (y_min || y_max || y_unit) then
+    if (goal || y_min || y_max || y_unit) then
         y = {}
+        y["goal"] = goal if goal
         y["minValue"] = y_min if y_min
         y["maxValue"] = y_max if y_max
         y["units"] = {"suffix" => y_unit} if y_unit
@@ -172,17 +173,17 @@ def prepare_series(series, time_span)
 end
 
 get "/stats/:obfuscator/steps" do
-    simple_sequence_chart("Steps", @user.steps_series, "7d")
+    simple_sequence_chart("Steps", @user.steps_series, "7d", @user.step_goal)
 end
 get "/stats/:obfuscator/steps/:span" do
-    simple_sequence_chart("Steps", @user.steps_series, params[:span])
+    simple_sequence_chart("Steps", @user.steps_series, params[:span], @user.step_goal)
 end
 
 get "/stats/:obfuscator/floors" do
-    simple_sequence_chart("Floors", @user.floors_series, "7d")
+    simple_sequence_chart("Floors", @user.floors_series, "7d", @user.floor_goal)
 end
 get "/stats/:obfuscator/floors/:span" do
-    simple_sequence_chart("Floors", @user.floors_series, "7d")
+    simple_sequence_chart("Floors", @user.floors_series, "7d", @user.floor_goal)
 end
 
 get "/stats/:obfuscator/calories" do

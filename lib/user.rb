@@ -53,10 +53,6 @@ module Fitstats
             })
         end
 
-        def invalidate_pi_cache
-            @pi_timestamp = nil
-        end
-
         def name
             @personal_info["displayName"]
         end
@@ -89,6 +85,13 @@ module Fitstats
             end
         end
 
+        def step_goal
+            @goal_info["steps"]
+        end
+
+        def floor_goal
+            @goal_info["floors"]
+        end
 
         def invalidate_ws_cache
             @ws_timestamp = nil
@@ -122,6 +125,10 @@ module Fitstats
             @pi_timestamp = nil
         end
 
+        def invalidate_gl_cache
+            @gl_timestamp = nil
+        end
+
         def refresh_fitbit_data
             futures = []
 
@@ -130,6 +137,14 @@ module Fitstats
                 futures.push Celluloid::Future.new {
                     @personal_info = fitbit.user_info["user"]
                     @pi_timestamp = Time.now
+                }
+            end
+
+            if @goal_info.nil? or @gl_timestamp.nil? or (Time.now - @gl_timestamp).to_i > GOAL_FREQUENCY
+                log "Refreshing goal info for #{@fitbit_uid}."
+                futures.push Celluloid::Future.new {
+                    @goal_info = fitbit.daily_goals["goals"]
+                    @gl_timestamp = Time.now
                 }
             end
 
